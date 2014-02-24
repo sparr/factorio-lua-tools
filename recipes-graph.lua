@@ -1,3 +1,5 @@
+#!/usr/bin/env lua
+
 local Loader = require("loader")
 local io = require("io")
 
