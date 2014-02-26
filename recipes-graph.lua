@@ -13,6 +13,7 @@ goal_color = "#666666"
 language = "en"
 output_format='dot'
 valid_output_formats = {png=true,dot=true}
+specific_item = nil
 
 -- some attributes are specific to certain graphviz engines, such as dot or neato
 -- http://www.graphviz.org/content/attrs
@@ -40,6 +41,10 @@ for a=1,#arg do
         output_format = arg[a+1]
         table.insert(args_to_delete,1,a)
         table.insert(args_to_delete,1,a+1)
+    elseif arg[a] == '-i' then
+        specific_item = arg[a+1]
+        table.insert(args_to_delete,1,a)
+        table.insert(args_to_delete,1,a+1)
     end
 end
 for a=#args_to_delete,1,-1 do
@@ -51,19 +56,32 @@ function print_usage(err)
     if(err) then
         io.stderr:write(err..'\n')
     end
-    io.stderr:write([[This is receipe grapher for factorio. WIP!
+    io.stderr:write([[Recipe grapher for Factorio. This is a work in progress.
 Loads contents of several mods and outputs graphs of depencies for all items.
 
-This invocation produces one png for each recipe:
+Usage:
 
+    recipe-graph.lua [-T <type>] [-i <item>] /path/to/data/core [/path/to/data/base] [/path/to/mods/examplemod] [...]
+
+    -T <type>
+        type can be one of "png" or "dot"
+        defaut type is "dot"
+    -i <item>
+        item is the internal name of a single item, such as "basic-transport-belt"
+        default is to output all items
+
+Examples:
+
+This invocation produces one png for each recipe:
+    recipes-graph.lua -T png /path/to/data/core /path/to/data/base
+
+This invocation produces one png for each recipe:
     recipes-graph.lua -T png /path/to/data/core /path/to/data/base
 
 This invocation produces one dot file for each recipe:
-
     recipes-graph.lua -T dot /path/to/data/core /path/to/data/base
 
 If you have other mods installed, their paths can be added to the end of the command line:
-
     recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech
 
 ]])
@@ -355,11 +373,29 @@ Loader.load_data(arg, "en")
 enumerate_resource_items()
 enumerate_recipes()
 
+graphs_generated = 0
+
 for k, item_type in ipairs(Loader.item_types) do
     for name, item in pairs(Loader.data[item_type]) do
-        output_graph(Ingredient.from_recipe{name = name, type="item", amount=1})
+        if(specific_item == nil or specific_item == name) then
+            graphs_generated = graphs_generated + 1
+            output_graph(Ingredient.from_recipe{name = name, type="item", amount=1})
+        end
     end
 end
 for name, item in pairs(Loader.data["fluid"]) do
-    output_graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
+    if(specific_item == nil or specific_item == name) then
+        graphs_generated = graphs_generated + 1
+        output_graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
+    end
+end
+
+if(graphs_generated == 0) then
+    if(specific_item ==nil) then
+        io.stderr:write('No graphs generated. Something is wrong.\n')
+    else
+        io.stderr:write('Item "'..specific_item..'" not found. No graph generated.\n')
+    end
+else
+    print('Generated '..graphs_generated..' graphs.')
 end
