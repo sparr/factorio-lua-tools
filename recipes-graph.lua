@@ -1,3 +1,5 @@
+#!/usr/bin/env lua
+
 local Loader = require("loader")
 local io = require("io")
 
@@ -9,6 +11,64 @@ recipe_colors = {
 }
 goal_color = "#666666"
 language = "en"
+output_format='dot'
+
+if pcall(function () require ("gv") end) then
+    has_gv=true
+else
+    has_gv=false
+end
+
+valid_output_formats = {png=true,dot=true}
+
+args_to_delete = {}
+for a=1,#arg do
+    if arg[a] == '-T' then
+        output_format = arg[a+1]
+        table.insert(args_to_delete,1,a)
+        table.insert(args_to_delete,1,a+1)
+    end
+end
+
+for a=#args_to_delete,1,-1 do
+    table.remove(arg,a)
+end
+
+function print_usage(err)
+    if(err) then
+        io.stderr:write(err..'\n')
+    end
+    io.stderr:write([[This is receipe grapher for factorio. WIP!
+Loads contents of several mods and outputs graphs of depencies for all items.
+
+This invocation produces one png for each recipe (and requires the graphviz lua bindings):
+
+    recipes-graph.lua -T png /path/to/data/core /path/to/data/base
+
+This invocation produces a dot file describing every recipe:
+
+    recipes-graph.lua -T dot /path/to/data/core /path/to/data/base
+
+This command produces the dot file and then asks the 'dot' program to render it:
+
+    recipes-graph.lua -T dot /path/to/data/core /path/to/data/base | dot -T png -O
+
+If you have other mods installed, their paths can be added to the end of the command line:
+
+    recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech
+
+]])
+end
+
+if(valid_output_formats[output_format]==nil) then
+    print_usage('Invalid output type specified')
+    os.exit()
+end
+
+if(output_format=='png' and has_gv==false) then
+    print_usage('png format requested but graphviz lua lib not available')
+    os.exit()
+end
 
 Ingredient = {}
 function Ingredient:new(o)
@@ -249,20 +309,18 @@ function graph(goal)
 
     ret = ret .. "}"
 
-    return ret
+    if(output_format=='png') then
+        print(goal.id)
+        g=gv.readstring(ret)
+        gv.layout(g, 'dot')
+        gv.render(g, 'png', goal.id .. '.png');
+    elseif(output_format=='dot') then
+        print(ret)
+    else
+        io.stderr:write('Unknown output format "'..output_format..'". Falling back to dot.\n')
+        print(ret)
+    end
 end
-
-
-io.stderr:write([[This is receipe grapher for factorio. WIP!
-Loads contents of several mods and outputs graphviz language description of graphs of depencies for all items.")
-
-How to run this:
-
-lua recipes-graph.lua ~/Factorio/data/core ~/Factorio/data/base | dot -T png -O
-
-This will generate a lot of png images in the current directory.
-
-]])
 
 Loader.load_data(arg, "en")
 enumerate_resource_items()
@@ -270,9 +328,9 @@ enumerate_recipes()
 
 for k, item_type in ipairs(Loader.item_types) do
     for name, item in pairs(Loader.data[item_type]) do
-        print(graph(Ingredient.from_recipe{name = name, type="item", amount=1}))
+        graph(Ingredient.from_recipe{name = name, type="item", amount=1})
     end
 end
 for name, item in pairs(Loader.data["fluid"]) do
-    print(graph(Ingredient.from_recipe{name = name, type="fluid", amount=1}))
+    graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
 end
