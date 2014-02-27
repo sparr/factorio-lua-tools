@@ -18,6 +18,8 @@ layout_engine='dot'
 output_format='png'
 valid_output_formats = {png=true,jpg=true,dot=true}
 specific_item = nil
+monolithic_graph = false
+monolithic_ranksep = 2 -- height in inches of each row of the graph
 skip_output_items = false
 
 -- some attributes are specific to certain graphviz engines, such as dot or neato
@@ -50,6 +52,9 @@ for a=1,#arg do
         specific_item = arg[a+1]
         table.insert(args_to_delete,1,a)
         table.insert(args_to_delete,1,a+1)
+    elseif arg[a] == '-m' then
+        monolithic_graph = true
+        table.insert(args_to_delete,1,a)
     elseif arg[a] == '--skip-output-items' then
         skip_output_items = true
         table.insert(args_to_delete,1,a)
@@ -77,6 +82,8 @@ Usage:
     -i <item>
         item is the internal name of a single item, such as "basic-transport-belt"
         default is to output all items
+    -m
+        draw a single monolithic graph of every item instead of one graph per item
     --skip-output-items
         do not draw an item node for items not used in any further recipes
 
@@ -250,7 +257,7 @@ function add_item_port(list, item, port)
     end
 end
 
-function recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
+function recipe_node(graph, recipe, closed, goal_items, item_sources, item_sinks)
     if recipe_colors[recipe.category] == nil then
         error(recipe.category .. " is not a known recipe category (add it to recipe_colors)")
     end
@@ -275,7 +282,7 @@ function recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
         add_item_port(item_sinks, ingredient, {recipe.id})
 
         if not closed[ingredient.id] then
-            waiting[#waiting + 1] = ingredient
+            goal_items[#goal_items + 1] = ingredient
         end
     end
 
@@ -288,21 +295,29 @@ function item_node(graph, item_id, goal)
     node = gv.node(graph, ingredient.id)
     gv.setv(node, 'image', ingredient.image)
     -- gv.setv(node, 'xlabel', ingredient.amount .. ' / s')
-    if type == goal.type and name == goal.name then
-        for attr,value in pairs(goal_attributes) do
-            gv.setv(node, attr, value)
+    if(goal) then
+        if type == goal.type and name == goal.name then
+            for attr,value in pairs(goal_attributes) do
+                gv.setv(node, attr, value)
+            end
         end
     end
     return node
 end
 
-function output_graph(goal)
-    local graph = gv.digraph(goal.id)
+function output_graph(goal_items)
+    local graphname = (monolithic_graph) and 'factorio' or (goal_items[1].id)
+    local graph = gv.digraph(graphname)
+
+    if(monolithic_graph) then
+        gv.setv(graph, 'ranksep', monolithic_ranksep)
+    else
+        gv.setv(graph, 'root', goal_items[1].id)
+    end
     
     for attr,value in pairs(graph_attributes) do
         gv.setv(graph, attr, value);
     end
-    gv.setv(graph, 'root', goal.id)
     if(output_format=='jpg' and graph_attributes.bgcolor=='transparent') then
         gv.setv(graph, 'bgcolor', 'white')
     end
@@ -314,13 +329,13 @@ function output_graph(goal)
     end
 
     local closed = {}
-    local waiting = { goal }
     local item_sources = {}
     local item_sinks = {}
 
-    while #waiting > 0 do
-        local current = waiting[#waiting]
-        waiting[#waiting] = nil
+    local i=0
+    while i<#goal_items do
+        i=i+1
+        local current = goal_items[i]
         if closed[current.id] == nil then
             closed[current.id] = current
         end
@@ -328,7 +343,7 @@ function output_graph(goal)
         if not resource_items[current.id] and recipes_by_result[current.id] ~= nil then
             for k, recipe in pairs(recipes_by_result[current.id]) do
                 if not closed[recipe.id] then
-                    recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
+                    recipe_node(graph, recipe, closed, goal_items, item_sources, item_sinks)
                     closed[recipe.id] = 1
                 end
             end
@@ -368,8 +383,9 @@ function output_graph(goal)
     for id, sink_ports in pairs(item_sinks) do
         for k, sink_port in pairs(sink_ports) do
             if item_sources[id] == nil then
-                item_node(graph, id, goal)
+                item_node(graph, id, #goal_items==1 and goal_items[1] or nil)
                 gv.edge(graph, id, sink_port[1])
+                gv.setv(edge,'weight','100')
                 if (sink_port[2]) then
                     gv.setv(edge,'headport',sink_port[2])
                 end
@@ -378,15 +394,17 @@ function output_graph(goal)
     end
 
     if(output_format=='png' or output_format=='jpg') then
-        print(goal.id)
+        if(not monolithic_graph) then
+            print(goal_items[1].id)
+        end
         gv.layout(graph, layout_engine)
-        gv.render(graph, output_format, goal.id .. '.' .. output_format)
+        gv.render(graph, output_format, graphname .. '.' .. output_format)
     else
         if(not (output_format=='dot')) then
             io.stderr:write('Unknown output format "'..output_format..'". Falling back to dot.\n')
         end
         gv.layout(g, 'dot')
-        gv.write(graph, goal.id .. '.dot')
+        gv.write(graph, graphname .. '.dot')
     end
 end
 
@@ -395,20 +413,25 @@ enumerate_resource_items()
 enumerate_recipes()
 
 graphs_generated = 0
+item_list = {}
 
+table.insert(Loader.item_types,"fluid")
 for k, item_type in ipairs(Loader.item_types) do
     for name, item in pairs(Loader.data[item_type]) do
         if(specific_item == nil or specific_item == name) then
-            graphs_generated = graphs_generated + 1
-            output_graph(Ingredient.from_recipe{name = name, type="item", amount=1})
+            if(monolithic_graph) then
+                table.insert(item_list,Ingredient.from_recipe{name = name, type=(item_type=="fluid") and "fluid" or "item", amount=1})
+            else
+                graphs_generated = graphs_generated + 1
+                output_graph({Ingredient.from_recipe{name = name, type=(item_type=="fluid") and "fluid" or "item", amount=1}})
+            end
         end
     end
 end
-for name, item in pairs(Loader.data["fluid"]) do
-    if(specific_item == nil or specific_item == name) then
-        graphs_generated = graphs_generated + 1
-        output_graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
-    end
+
+if(monolithic_graph) then
+    output_graph(item_list)
+    graphs_generated = graphs_generated + 1
 end
 
 if(graphs_generated == 0) then
