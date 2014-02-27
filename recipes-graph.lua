@@ -18,6 +18,7 @@ layout_engine='dot'
 output_format='png'
 valid_output_formats = {png=true,jpg=true,dot=true}
 specific_item = nil
+skip_output_items = false
 
 -- some attributes are specific to certain graphviz engines, such as dot or neato
 -- http://www.graphviz.org/content/attrs
@@ -49,6 +50,9 @@ for a=1,#arg do
         specific_item = arg[a+1]
         table.insert(args_to_delete,1,a)
         table.insert(args_to_delete,1,a+1)
+    elseif arg[a] == '--skip-output-items' then
+        skip_output_items = true
+        table.insert(args_to_delete,1,a)
     end
 end
 for a=1,#args_to_delete do
@@ -73,6 +77,8 @@ Usage:
     -i <item>
         item is the internal name of a single item, such as "basic-transport-belt"
         default is to output all items
+    --skip-output-items
+        do not draw an item node for items not used in any further recipes
 
 Examples:
 
@@ -347,10 +353,13 @@ function output_graph(goal)
                     end
                 end
             else
-                item_node(graph, id, goal)
-                local edge = gv.edge(graph, source_port[1], id)
-                if (source_port[2]) then
-                    gv.setv(edge,'tailport',source_port[2])
+                if(not skip_output_items) then
+                    item_node(graph, id, (not monolithic_graph) and goal_items[1] or nil)
+                    local edge = gv.edge(graph, source_port[1], id)
+                    gv.setv(edge,'weight','1000')
+                    if (source_port[2]) then
+                        gv.setv(edge,'tailport',source_port[2])
+                    end
                 end
             end
         end
