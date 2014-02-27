@@ -11,8 +11,9 @@ recipe_colors = {
 }
 goal_color = "#666666"
 language = "en"
-output_format='dot'
-valid_output_formats = {png=true,dot=true}
+layout_engine='dot'
+output_format='png'
+valid_output_formats = {png=true,jpg=true,dot=true}
 specific_item = nil
 
 -- some attributes are specific to certain graphviz engines, such as dot or neato
@@ -64,8 +65,8 @@ Usage:
     recipe-graph.lua [-T <type>] [-i <item>] /path/to/data/core [/path/to/data/base] [/path/to/mods/examplemod] [...]
 
     -T <type>
-        type can be one of "png" or "dot"
-        defaut type is "dot"
+        type can be one of "png" or "jpg" or "dot"
+        defaut type is "png"
     -i <item>
         item is the internal name of a single item, such as "basic-transport-belt"
         default is to output all items
@@ -75,14 +76,14 @@ Examples:
 This invocation produces one png for each recipe:
     recipes-graph.lua -T png /path/to/data/core /path/to/data/base
 
-This invocation produces one png for each recipe:
-    recipes-graph.lua -T png /path/to/data/core /path/to/data/base
+This invocation produces one jpg, only for the stone wall recipe:
+    recipes-graph.lua -T jpg -i stone-wall /path/to/data/core /path/to/data/base
 
 This invocation produces one dot file for each recipe:
     recipes-graph.lua -T dot /path/to/data/core /path/to/data/base
 
 If you have other mods installed, their paths can be added to the end of the command line:
-    recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech
+    recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech    
 
 ]])
 end
@@ -291,6 +292,9 @@ function output_graph(goal)
     for attr,value in pairs(graph_attributes) do
         gv.setv(graph, attr, value);
     end
+    if(output_format=='jpg' and graph_attributes.bgcolor=='transparent') then
+        gv.setv(graph, 'bgcolor', 'white')
+    end
     for attr,value in pairs(node_attributes) do
         gv.setv(gv.protonode(graph), attr, value);
     end
@@ -355,11 +359,10 @@ function output_graph(goal)
         end
     end
 
-
-    if(output_format=='png') then
+    if(output_format=='png' or output_format=='jpg') then
         print(goal.id)
-        gv.layout(graph, 'dot')
-        gv.render(graph, 'png', goal.id .. '.png')
+        gv.layout(graph, layout_engine)
+        gv.render(graph, output_format, goal.id .. '.' .. output_format)
     else
         if(not (output_format=='dot')) then
             io.stderr:write('Unknown output format "'..output_format..'". Falling back to dot.\n')
