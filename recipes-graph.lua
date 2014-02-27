@@ -86,7 +86,7 @@ This invocation produces one dot file for each recipe:
     recipes-graph.lua -T dot /path/to/data/core /path/to/data/base
 
 If you have other mods installed, their paths can be added to the end of the command line:
-    recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech    
+    recipes-graph.lua /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech    
 
 ]])
 end
