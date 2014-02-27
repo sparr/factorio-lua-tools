@@ -20,9 +20,9 @@ specific_item = nil
 graph_attributes = {
     bgcolor = 'transparent',
     rankdir = 'BT',
-    overlap = 'false',
+    -- overlap = 'false', -- need more options before enabling overlap removal
     splines = 'spline',
-    model = 'circuit',
+    model = 'subset',
     mode = 'hier',
     levelsgap = '10',
 }
