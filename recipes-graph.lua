@@ -12,49 +12,76 @@ recipe_colors = {
 goal_color = "#666666"
 language = "en"
 output_format='dot'
-
-if pcall(function () require ("gv") end) then
-    has_gv=true
-else
-    has_gv=false
-end
-
 valid_output_formats = {png=true,dot=true}
+specific_item = nil
 
+-- some attributes are specific to certain graphviz engines, such as dot or neato
+-- http://www.graphviz.org/content/attrs
+graph_attributes = {
+    bgcolor = 'transparent',
+    rankdir = 'BT',
+    overlap = 'false',
+    splines = 'spline',
+    model = 'circuit',
+    mode = 'hier',
+    levelsgap = '10',
+}
+
+-- BUG: empty label is ignored by graphviz library
+node_attributes = {
+    label = '',
+}
+
+edge_attributes = {}
+
+-- simple command line argument processor
 args_to_delete = {}
 for a=1,#arg do
     if arg[a] == '-T' then
         output_format = arg[a+1]
         table.insert(args_to_delete,1,a)
         table.insert(args_to_delete,1,a+1)
+    elseif arg[a] == '-i' then
+        specific_item = arg[a+1]
+        table.insert(args_to_delete,1,a)
+        table.insert(args_to_delete,1,a+1)
     end
 end
-
 for a=#args_to_delete,1,-1 do
     table.remove(arg,a)
 end
+-- arg is left containing a list of unrecognized arguments, which should be paths to all of the game mods
 
 function print_usage(err)
     if(err) then
         io.stderr:write(err..'\n')
     end
-    io.stderr:write([[This is receipe grapher for factorio. WIP!
+    io.stderr:write([[Recipe grapher for Factorio. This is a work in progress.
 Loads contents of several mods and outputs graphs of depencies for all items.
 
-This invocation produces one png for each recipe (and requires the graphviz lua bindings):
+Usage:
 
+    recipe-graph.lua [-T <type>] [-i <item>] /path/to/data/core [/path/to/data/base] [/path/to/mods/examplemod] [...]
+
+    -T <type>
+        type can be one of "png" or "dot"
+        defaut type is "dot"
+    -i <item>
+        item is the internal name of a single item, such as "basic-transport-belt"
+        default is to output all items
+
+Examples:
+
+This invocation produces one png for each recipe:
     recipes-graph.lua -T png /path/to/data/core /path/to/data/base
 
-This invocation produces a dot file describing every recipe:
+This invocation produces one png for each recipe:
+    recipes-graph.lua -T png /path/to/data/core /path/to/data/base
 
+This invocation produces one dot file for each recipe:
     recipes-graph.lua -T dot /path/to/data/core /path/to/data/base
 
-This command produces the dot file and then asks the 'dot' program to render it:
-
-    recipes-graph.lua -T dot /path/to/data/core /path/to/data/base | dot -T png -O
-
 If you have other mods installed, their paths can be added to the end of the command line:
-
     recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech
 
 ]])
@@ -65,8 +92,9 @@ if(valid_output_formats[output_format]==nil) then
     os.exit()
 end
 
-if(output_format=='png' and has_gv==false) then
-    print_usage('png format requested but graphviz lua lib not available')
+if pcall(function () require ("gv") end) then
+else
+    print_usage('graphviz lua lib not available')
     os.exit()
 end
 
@@ -212,55 +240,63 @@ function add_item_port(list, item, port)
     end
 end
 
-function recipe_node(recipe, closed, waiting, item_sources, item_sinks)
-    local ret = ''
-
+function recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
     if recipe_colors[recipe.category] == nil then
         error(recipe.category .. " is not a known recipe category (add it to recipe_colors)")
     end
-    ret = ret .. '"' .. recipe.id .. '" [ '
-    ret = ret .. 'shape = plaintext,'
+    node = gv.node(graph, recipe.id)
+    gv.setv(node, 'shape', 'plaintext')
 
+    local label = ''
     local colspan = 0
-    ret = ret .. '\nlabel = <<TABLE bgcolor = "' .. recipe_colors[recipe.category] .. '" border="0" cellborder="1" cellspacing="0"><TR>\n'
+    label = label .. '<<TABLE bgcolor = "' .. recipe_colors[recipe.category] .. '" border="0" cellborder="1" cellspacing="0"><TR>\n'
     for k, result in ipairs(recipe.results) do
-        ret = ret .. '<TD port="' .. result.id .. '"><IMG src="' .. result.image .. '" /></TD>\n'
+        label = label .. '<TD port="' .. result.id .. '"><IMG src="' .. result.image .. '" /></TD>\n'
 
-        add_item_port(item_sources, result, '"' .. recipe.id .. '":"' .. result.id .. ':n"')
+        add_item_port(item_sources, result, {recipe.id,result.id .. ':n'})
         colspan = colspan + 1
     end
-    ret = ret .. '</TR><TR><TD colspan="' .. colspan .. '">' .. recipe:translated_name(language) .. '</TD>'
-    ret = ret .. '</TR></TABLE>>];\n'
+    label = label .. '</TR><TR><TD colspan="' .. colspan .. '">' .. recipe:translated_name(language) .. '</TD>'
+    label = label .. '</TR></TABLE>>'
+
+    gv.setv(node, 'label', label)
 
     for k, ingredient in ipairs(recipe.ingredients) do
-        add_item_port(item_sinks, ingredient, '"' .. recipe.id .. '"')
+        add_item_port(item_sinks, ingredient, {recipe.id})
 
         if not closed[ingredient.id] then
             waiting[#waiting + 1] = ingredient
         end
     end
 
-    return ret
+    return node
 end
 
-function item_node(item_id, goal)
+function item_node(graph, item_id, goal)
     local type, name = item_id:match('^(%a+)-(.*)$')
     ingredient = Ingredient.from_recipe{type = type, name = name, amount = 1}
-    local ret = '"' .. ingredient.id .. '" ['
-    ret = ret .. 'image = "' .. ingredient.image .. '", '
-    --ret = ret .. 'xlabel = "' .. ingredient.amount .. ' / s", '
+    node = gv.node(graph, ingredient.id)
+    gv.setv(node, 'image', ingredient.image)
+    -- gv.setv(node, 'xlabel', ingredient.amount .. ' / s')
     if type == goal.type and name == goal.name then
-        ret = ret .. 'fillcolor = "' .. goal_color .. '", '
-        ret = ret .. 'style = filled, '
+        gv.setv(node, 'fillcolor', goal_color)
+        gv.setv(node, 'style', 'filled')
     end
-    ret = ret .. '];\n'
-    return ret
+    return node
 end
 
-function graph(goal)
-    local ret = 'digraph "' .. goal.id .. '" {\n'
-    ret = ret .. 'graph [bgcolor=transparent, rankdir=BT];\n'
-    ret = ret .. 'node [label=""];\n'
+function output_graph(goal)
+    local graph = gv.digraph(goal.id)
+    
+    for attr,value in pairs(graph_attributes) do
+        gv.setv(graph, attr, value);
+    end
+    for attr,value in pairs(node_attributes) do
+        gv.setv(gv.protonode(graph), attr, value);
+    end
+    for attr,value in pairs(edge_attributes) do
+        gv.setv(gv.protoedge(graph), attr, value);
+    end
 
     local closed = {}
     local waiting = { goal }
@@ -277,7 +313,7 @@ function graph(goal)
         if not resource_items[current.id] and recipes_by_result[current.id] ~= nil then
             for k, recipe in pairs(recipes_by_result[current.id]) do
                 if not closed[recipe.id] then
-                    ret = ret .. recipe_node(recipe, closed, waiting, item_sources, item_sinks)
+                    recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
                     closed[recipe.id] = 1
                 end
             end
@@ -289,11 +325,20 @@ function graph(goal)
             sink_ports = item_sinks[id]
             if sink_ports then
                 for k, sink_port in ipairs(sink_ports) do
-                    ret = ret .. source_port .. ' -> ' .. sink_port .. ';\n'
+                    local edge = gv.edge(graph, source_port[1], sink_port[1])
+                    if (source_port[2]) then
+                        gv.setv(edge,'tailport',source_port[2])
+                    end
+                    if (sink_port[2]) then
+                        gv.setv(edge,'headport',sink_port[2])
+                    end
                 end
             else
-                ret = ret .. item_node(id, goal)
-                ret = ret .. source_port .. ' -> "' .. id .. '";\n'
+                item_node(graph, id, goal)
+                local edge = gv.edge(graph, source_port[1], id)
+                if (source_port[2]) then
+                    gv.setv(edge,'tailport',source_port[2])
+                end
             end
         end
     end
@@ -301,24 +346,26 @@ function graph(goal)
     for id, sink_ports in pairs(item_sinks) do
         for k, sink_port in pairs(sink_ports) do
             if item_sources[id] == nil then
-                ret = ret .. item_node(id, goal)
-                ret = ret .. '"' .. id .. '" -> ' .. sink_port .. ';\n'
+                item_node(graph, id, goal)
+                gv.edge(graph, id, sink_port[1])
+                if (sink_port[2]) then
+                    gv.setv(edge,'headport',sink_port[2])
+                end
             end
         end
     end
 
-    ret = ret .. "}"
 
     if(output_format=='png') then
         print(goal.id)
-        g=gv.readstring(ret)
-        gv.layout(g, 'dot')
-        gv.render(g, 'png', goal.id .. '.png');
-    elseif(output_format=='dot') then
-        print(ret)
+        gv.layout(graph, 'dot')
+        gv.render(graph, 'png', goal.id .. '.png')
     else
-        io.stderr:write('Unknown output format "'..output_format..'". Falling back to dot.\n')
-        print(ret)
+        if(not (output_format=='dot')) then
+            io.stderr:write('Unknown output format "'..output_format..'". Falling back to dot.\n')
+        end
+        gv.layout(g, 'dot')
+        gv.write(graph, goal.id .. '.dot')
     end
 end
 
@@ -326,11 +373,29 @@ Loader.load_data(arg, "en")
 enumerate_resource_items()
 enumerate_recipes()
 
+graphs_generated = 0
+
 for k, item_type in ipairs(Loader.item_types) do
     for name, item in pairs(Loader.data[item_type]) do
-        graph(Ingredient.from_recipe{name = name, type="item", amount=1})
+        if(specific_item == nil or specific_item == name) then
+            graphs_generated = graphs_generated + 1
+            output_graph(Ingredient.from_recipe{name = name, type="item", amount=1})
+        end
     end
 end
 for name, item in pairs(Loader.data["fluid"]) do
-    graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
+    if(specific_item == nil or specific_item == name) then
+        graphs_generated = graphs_generated + 1
+        output_graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
+    end
+end
+
+if(graphs_generated == 0) then
+    if(specific_item ==nil) then
+        io.stderr:write('No graphs generated. Something is wrong.\n')
+    else
+        io.stderr:write('Item "'..specific_item..'" not found. No graph generated.\n')
+    end
+else
+    print('Generated '..graphs_generated..' graphs.')
 end
