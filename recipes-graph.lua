@@ -19,8 +19,9 @@ output_format='png'
 valid_output_formats = {png=true,jpg=true,dot=true}
 specific_item = nil
 monolithic_graph = false
-monolithic_ranksep = 2 -- height in inches of each row of the graph
+monolithic_ranksep = 1.5 -- height in inches of each row of the graph
 skip_output_items = false
+edge_color = false
 
 -- some attributes are specific to certain graphviz engines, such as dot or neato
 -- http://www.graphviz.org/content/attrs
@@ -39,7 +40,9 @@ node_attributes = {
     label = '',
 }
 
-edge_attributes = {}
+edge_attributes = {
+    penwidth = 2,
+}
 
 -- simple command line argument processor
 args_to_delete = {}
@@ -57,6 +60,9 @@ for a=1,#arg do
         table.insert(args_to_delete,1,a)
     elseif arg[a] == '--skip-output-items' then
         skip_output_items = true
+        table.insert(args_to_delete,1,a)
+    elseif arg[a] == '-c' then
+        edge_color = true
         table.insert(args_to_delete,1,a)
     end
 end
@@ -113,6 +119,25 @@ if pcall(function () require ("gv") end) then
 else
     print_usage('graphviz lua lib not available')
     os.exit()
+end
+
+-- http://www.wowwiki.com/USERAPI_StringHash
+function StringHash(text)
+  local counter = 1
+  local len = string.len(text)
+  for i = 1, len, 3 do 
+    counter = math.fmod(counter*8161, 4294967279) +  -- 2^32 - 17: Prime!
+      (string.byte(text,i)*16776193) +
+      ((string.byte(text,i+1) or (len-i+256))*8372226) +
+      ((string.byte(text,i+2) or (len-i+256))*3932164)
+  end
+  return math.fmod(counter, 4294967291) -- 2^32 - 5: Prime (and different from the prime in the loop)
+end
+
+function color_from_name (name)
+    hash = StringHash(name)
+    -- "H.ue S.at V.al"
+    return ((hash%1000)/1000) .. " " .. ((math.floor(hash/1000)%1000)/2000+0.5) .. " " .. (0.5-(math.floor(hash/1000000)%1000)/2000+0.3)
 end
 
 Ingredient = {}
@@ -360,6 +385,9 @@ function output_graph(goal_items)
             if sink_ports then
                 for k, sink_port in ipairs(sink_ports) do
                     local edge = gv.edge(graph, source_port[1], sink_port[1])
+                    if(edge_color) then
+                        gv.setv(edge, 'color', color_from_name(source_port[1]))
+                    end
                     if (source_port[2]) then
                         gv.setv(edge,'tailport',source_port[2])
                     end
@@ -371,6 +399,9 @@ function output_graph(goal_items)
                 if(not skip_output_items) then
                     item_node(graph, id, (not monolithic_graph) and goal_items[1] or nil)
                     local edge = gv.edge(graph, source_port[1], id)
+                    if(edge_color) then
+                        gv.setv(edge, 'color', color_from_name(source_port[1]))
+                    end
                     gv.setv(edge,'weight','1000')
                     if (source_port[2]) then
                         gv.setv(edge,'tailport',source_port[2])
