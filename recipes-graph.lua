@@ -296,6 +296,7 @@ function output_graph(goal)
     for attr,value in pairs(graph_attributes) do
         gv.setv(graph, attr, value);
     end
+    gv.setv(graph, 'root', goal.id)
     if(output_format=='jpg' and graph_attributes.bgcolor=='transparent') then
         gv.setv(graph, 'bgcolor', 'white')
     end
@@ -325,6 +326,10 @@ function output_graph(goal)
                     closed[recipe.id] = 1
                 end
             end
+        elseif (item_sources[current.id]==nil and item_sinks[current.id]==nil) then
+            -- add a node for items not part of any recipe
+            -- usually this is when trying to draw a graph for a raw resource
+            item_node(graph, goal.id, goal)
         end
     end
 
