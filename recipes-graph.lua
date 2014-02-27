@@ -9,20 +9,28 @@ recipe_colors = {
     chemistry = "#99cc99",
     ["oil-processing"] = "#999900",
 }
-goal_color = "#666666"
+goal_attributes = {
+    fillcolor="#666666",
+    style='filled',
+}
 language = "en"
-output_format='dot'
-valid_output_formats = {png=true,dot=true}
+layout_engine='dot'
+output_format='png'
+valid_output_formats = {png=true,jpg=true,dot=true}
 specific_item = nil
+monolithic_graph = false
+monolithic_ranksep = 1.5 -- height in inches of each row of the graph
+skip_output_items = false
+edge_color = false
 
 -- some attributes are specific to certain graphviz engines, such as dot or neato
 -- http://www.graphviz.org/content/attrs
 graph_attributes = {
     bgcolor = 'transparent',
     rankdir = 'BT',
-    overlap = 'false',
+    -- overlap = 'false', -- need more options before enabling overlap removal
     splines = 'spline',
-    model = 'circuit',
+    model = 'subset',
     mode = 'hier',
     levelsgap = '10',
 }
@@ -32,7 +40,9 @@ node_attributes = {
     label = '',
 }
 
-edge_attributes = {}
+edge_attributes = {
+    penwidth = 2,
+}
 
 -- simple command line argument processor
 args_to_delete = {}
@@ -45,10 +55,19 @@ for a=1,#arg do
         specific_item = arg[a+1]
         table.insert(args_to_delete,1,a)
         table.insert(args_to_delete,1,a+1)
+    elseif arg[a] == '-m' then
+        monolithic_graph = true
+        table.insert(args_to_delete,1,a)
+    elseif arg[a] == '--skip-output-items' then
+        skip_output_items = true
+        table.insert(args_to_delete,1,a)
+    elseif arg[a] == '-c' then
+        edge_color = true
+        table.insert(args_to_delete,1,a)
     end
 end
-for a=#args_to_delete,1,-1 do
-    table.remove(arg,a)
+for a=1,#args_to_delete do
+    table.remove(arg,args_to_delete[a])
 end
 -- arg is left containing a list of unrecognized arguments, which should be paths to all of the game mods
 
@@ -64,25 +83,29 @@ Usage:
     recipe-graph.lua [-T <type>] [-i <item>] /path/to/data/core [/path/to/data/base] [/path/to/mods/examplemod] [...]
 
     -T <type>
-        type can be one of "png" or "dot"
-        defaut type is "dot"
+        type can be one of "png" or "jpg" or "dot"
+        defaut type is "png"
     -i <item>
         item is the internal name of a single item, such as "basic-transport-belt"
         default is to output all items
+    -m
+        draw a single monolithic graph of every item instead of one graph per item
+    --skip-output-items
+        do not draw an item node for items not used in any further recipes
 
 Examples:
 
 This invocation produces one png for each recipe:
     recipes-graph.lua -T png /path/to/data/core /path/to/data/base
 
-This invocation produces one png for each recipe:
-    recipes-graph.lua -T png /path/to/data/core /path/to/data/base
+This invocation produces one jpg, only for the stone wall recipe:
+    recipes-graph.lua -T jpg -i stone-wall /path/to/data/core /path/to/data/base
 
 This invocation produces one dot file for each recipe:
     recipes-graph.lua -T dot /path/to/data/core /path/to/data/base
 
 If you have other mods installed, their paths can be added to the end of the command line:
-    recipes-graph.lua -T png /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech
+    recipes-graph.lua /path/to/data/core /path/to/data/base /path/to/mods/Industrio /path/to/mods/DyTech    
 
 ]])
 end
@@ -96,6 +119,25 @@ if pcall(function () require ("gv") end) then
 else
     print_usage('graphviz lua lib not available')
     os.exit()
+end
+
+-- http://www.wowwiki.com/USERAPI_StringHash
+function StringHash(text)
+  local counter = 1
+  local len = string.len(text)
+  for i = 1, len, 3 do 
+    counter = math.fmod(counter*8161, 4294967279) +  -- 2^32 - 17: Prime!
+      (string.byte(text,i)*16776193) +
+      ((string.byte(text,i+1) or (len-i+256))*8372226) +
+      ((string.byte(text,i+2) or (len-i+256))*3932164)
+  end
+  return math.fmod(counter, 4294967291) -- 2^32 - 5: Prime (and different from the prime in the loop)
+end
+
+function color_from_name (name)
+    hash = StringHash(name)
+    -- "H.ue S.at V.al"
+    return ((hash%1000)/1000) .. " " .. ((math.floor(hash/1000)%1000)/2000+0.5) .. " " .. (0.5-(math.floor(hash/1000000)%1000)/2000+0.3)
 end
 
 Ingredient = {}
@@ -240,7 +282,7 @@ function add_item_port(list, item, port)
     end
 end
 
-function recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
+function recipe_node(graph, recipe, closed, goal_items, item_sources, item_sinks)
     if recipe_colors[recipe.category] == nil then
         error(recipe.category .. " is not a known recipe category (add it to recipe_colors)")
     end
@@ -265,7 +307,7 @@ function recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
         add_item_port(item_sinks, ingredient, {recipe.id})
 
         if not closed[ingredient.id] then
-            waiting[#waiting + 1] = ingredient
+            goal_items[#goal_items + 1] = ingredient
         end
     end
 
@@ -278,18 +320,31 @@ function item_node(graph, item_id, goal)
     node = gv.node(graph, ingredient.id)
     gv.setv(node, 'image', ingredient.image)
     -- gv.setv(node, 'xlabel', ingredient.amount .. ' / s')
-    if type == goal.type and name == goal.name then
-        gv.setv(node, 'fillcolor', goal_color)
-        gv.setv(node, 'style', 'filled')
+    if(goal) then
+        if type == goal.type and name == goal.name then
+            for attr,value in pairs(goal_attributes) do
+                gv.setv(node, attr, value)
+            end
+        end
     end
     return node
 end
 
-function output_graph(goal)
-    local graph = gv.digraph(goal.id)
+function output_graph(goal_items)
+    local graphname = (monolithic_graph) and 'factorio' or (goal_items[1].id)
+    local graph = gv.digraph(graphname)
+
+    if(monolithic_graph) then
+        gv.setv(graph, 'ranksep', monolithic_ranksep)
+    else
+        gv.setv(graph, 'root', goal_items[1].id)
+    end
     
     for attr,value in pairs(graph_attributes) do
         gv.setv(graph, attr, value);
+    end
+    if(output_format=='jpg' and graph_attributes.bgcolor=='transparent') then
+        gv.setv(graph, 'bgcolor', 'white')
     end
     for attr,value in pairs(node_attributes) do
         gv.setv(gv.protonode(graph), attr, value);
@@ -299,13 +354,13 @@ function output_graph(goal)
     end
 
     local closed = {}
-    local waiting = { goal }
     local item_sources = {}
     local item_sinks = {}
 
-    while #waiting > 0 do
-        local current = waiting[#waiting]
-        waiting[#waiting] = nil
+    local i=0
+    while i<#goal_items do
+        i=i+1
+        local current = goal_items[i]
         if closed[current.id] == nil then
             closed[current.id] = current
         end
@@ -313,10 +368,14 @@ function output_graph(goal)
         if not resource_items[current.id] and recipes_by_result[current.id] ~= nil then
             for k, recipe in pairs(recipes_by_result[current.id]) do
                 if not closed[recipe.id] then
-                    recipe_node(graph, recipe, closed, waiting, item_sources, item_sinks)
+                    recipe_node(graph, recipe, closed, goal_items, item_sources, item_sinks)
                     closed[recipe.id] = 1
                 end
             end
+        elseif (item_sources[current.id]==nil and item_sinks[current.id]==nil) then
+            -- add a node for items not part of any recipe
+            -- usually this is when trying to draw a graph for a raw resource
+            item_node(graph, current.id, current)
         end
     end
 
@@ -326,6 +385,9 @@ function output_graph(goal)
             if sink_ports then
                 for k, sink_port in ipairs(sink_ports) do
                     local edge = gv.edge(graph, source_port[1], sink_port[1])
+                    if(edge_color) then
+                        gv.setv(edge, 'color', color_from_name(source_port[1]))
+                    end
                     if (source_port[2]) then
                         gv.setv(edge,'tailport',source_port[2])
                     end
@@ -334,10 +396,16 @@ function output_graph(goal)
                     end
                 end
             else
-                item_node(graph, id, goal)
-                local edge = gv.edge(graph, source_port[1], id)
-                if (source_port[2]) then
-                    gv.setv(edge,'tailport',source_port[2])
+                if(not skip_output_items) then
+                    item_node(graph, id, (not monolithic_graph) and goal_items[1] or nil)
+                    local edge = gv.edge(graph, source_port[1], id)
+                    if(edge_color) then
+                        gv.setv(edge, 'color', color_from_name(source_port[1]))
+                    end
+                    gv.setv(edge,'weight','1000')
+                    if (source_port[2]) then
+                        gv.setv(edge,'tailport',source_port[2])
+                    end
                 end
             end
         end
@@ -346,8 +414,9 @@ function output_graph(goal)
     for id, sink_ports in pairs(item_sinks) do
         for k, sink_port in pairs(sink_ports) do
             if item_sources[id] == nil then
-                item_node(graph, id, goal)
+                item_node(graph, id, #goal_items==1 and goal_items[1] or nil)
                 gv.edge(graph, id, sink_port[1])
+                gv.setv(edge,'weight','100')
                 if (sink_port[2]) then
                     gv.setv(edge,'headport',sink_port[2])
                 end
@@ -355,17 +424,18 @@ function output_graph(goal)
         end
     end
 
-
-    if(output_format=='png') then
-        print(goal.id)
-        gv.layout(graph, 'dot')
-        gv.render(graph, 'png', goal.id .. '.png')
+    if(output_format=='png' or output_format=='jpg') then
+        if(not monolithic_graph) then
+            print(goal_items[1].id)
+        end
+        gv.layout(graph, layout_engine)
+        gv.render(graph, output_format, graphname .. '.' .. output_format)
     else
         if(not (output_format=='dot')) then
             io.stderr:write('Unknown output format "'..output_format..'". Falling back to dot.\n')
         end
         gv.layout(g, 'dot')
-        gv.write(graph, goal.id .. '.dot')
+        gv.write(graph, graphname .. '.dot')
     end
 end
 
@@ -374,20 +444,25 @@ enumerate_resource_items()
 enumerate_recipes()
 
 graphs_generated = 0
+item_list = {}
 
+table.insert(Loader.item_types,"fluid")
 for k, item_type in ipairs(Loader.item_types) do
     for name, item in pairs(Loader.data[item_type]) do
         if(specific_item == nil or specific_item == name) then
-            graphs_generated = graphs_generated + 1
-            output_graph(Ingredient.from_recipe{name = name, type="item", amount=1})
+            if(monolithic_graph) then
+                table.insert(item_list,Ingredient.from_recipe{name = name, type=(item_type=="fluid") and "fluid" or "item", amount=1})
+            else
+                graphs_generated = graphs_generated + 1
+                output_graph({Ingredient.from_recipe{name = name, type=(item_type=="fluid") and "fluid" or "item", amount=1}})
+            end
         end
     end
 end
-for name, item in pairs(Loader.data["fluid"]) do
-    if(specific_item == nil or specific_item == name) then
-        graphs_generated = graphs_generated + 1
-        output_graph(Ingredient.from_recipe{name = name, type="fluid", amount=1})
-    end
+
+if(monolithic_graph) then
+    output_graph(item_list)
+    graphs_generated = graphs_generated + 1
 end
 
 if(graphs_generated == 0) then
