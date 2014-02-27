@@ -9,7 +9,10 @@ recipe_colors = {
     chemistry = "#99cc99",
     ["oil-processing"] = "#999900",
 }
-goal_color = "#666666"
+goal_attributes = {
+    fillcolor="#666666",
+    style='filled',
+}
 language = "en"
 layout_engine='dot'
 output_format='png'
@@ -280,8 +283,9 @@ function item_node(graph, item_id, goal)
     gv.setv(node, 'image', ingredient.image)
     -- gv.setv(node, 'xlabel', ingredient.amount .. ' / s')
     if type == goal.type and name == goal.name then
-        gv.setv(node, 'fillcolor', goal_color)
-        gv.setv(node, 'style', 'filled')
+        for attr,value in pairs(goal_attributes) do
+            gv.setv(node, attr, value)
+        end
     end
     return node
 end
