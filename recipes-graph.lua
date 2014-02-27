@@ -47,8 +47,8 @@ for a=1,#arg do
         table.insert(args_to_delete,1,a+1)
     end
 end
-for a=#args_to_delete,1,-1 do
-    table.remove(arg,a)
+for a=1,#args_to_delete do
+    table.remove(arg,args_to_delete[a])
 end
 -- arg is left containing a list of unrecognized arguments, which should be paths to all of the game mods
 
