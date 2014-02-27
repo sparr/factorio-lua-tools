@@ -329,7 +329,7 @@ function output_graph(goal)
         elseif (item_sources[current.id]==nil and item_sinks[current.id]==nil) then
             -- add a node for items not part of any recipe
             -- usually this is when trying to draw a graph for a raw resource
-            item_node(graph, goal.id, goal)
+            item_node(graph, current.id, current)
         end
     end
 
